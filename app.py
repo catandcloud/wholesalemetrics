@@ -41,35 +41,24 @@ def week_num_to_dates(last_week_num):
 	# Convert the week number to special string format
 	week_num = "%d-W%d" % (2017, last_week_num)
 
-	# Get the start date, and add 1 day to it to make it Monday
-	start_date = (datetime.datetime.strptime(week_num + '-0', "%Y-W%W-%w") + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+	# Get the start date, and subtract 3 days to make it the previous Thursday at midnight
+	start_date = (datetime.datetime.strptime(week_num + '-0', "%Y-W%W-%w") + datetime.timedelta(days=-3)).replace(hour=0, minute=0, second=0, microsecond=0)
 
-	# Get the end date by adding 4 days to the start date, making it Friday
-	end_date = (start_date + datetime.timedelta(days=4)).replace(hour=23, minute=59, second=59, microsecond=0)
+	# Get the end date by adding 6 days to the start date, making it Wednesday at 11:59pm
+	end_date = (start_date + datetime.timedelta(days=6)).replace(hour=23, minute=59, second=59, microsecond=0)
 
 	return str(start_date), str(end_date)
 
-def shipments_by_customer(customer, start_date, end_date):
-	# Query for shipments by customer for the current week
-	endpoint = 'shipments'
-	params = 'shipDateStart=' + start_date +  '&shipDateEnd=' + end_date + '&recipientName=' + customer.get('name') + '&includeShipmentItems=True'
-	shipment_results = make_api_query(endpoint, params)
+def orders_by_customer(customer, start_date, end_date):
+	# Query for orders by customer for the current week
+	endpoint = 'orders'
+	params = 'orderDateStart=' + start_date +  '&orderDateEnd=' + end_date + '&customerName=' + customer.get('name')
 
-	# Query for fulfillments by customer for the current week
-	endpoint = 'fulfillments'
-	params = 'shipDateStart=' + start_date +  '&shipDateEnd=' + end_date + '&recipientName=' + customer.get('name')
-	fulfillment_results = make_api_query(endpoint, params)
+	order_results = make_api_query(endpoint, params)
 
-	# If fulfillments, dig deeper
-	if fulfillment_results.get('total') > 0:
-		# Loop through fulfillments and query orders to get order items
-		pass
+	return order_results
 
-	# Combine shipments and fulfillments
-
-	return shipment_results
-
-def coffee_sizes_in_shipments(shipments):
+def coffee_sizes_in_orders(orders):
 	coffee_dict = {}
 
 	def item_to_dict(item):
@@ -79,8 +68,8 @@ def coffee_sizes_in_shipments(shipments):
 					coffee_dict[curr_size] = 0
 				coffee_dict[curr_size] += item.get('quantity')
 
-	for shipment in shipments.get('shipments'):
-		for item in shipment.get('shipmentItems'):
+	for order in orders.get('orders'):
+		for item in order.get('items'):
 			if 'CFE' in item.get('sku'):
 				item_to_dict(item)
 
@@ -109,7 +98,7 @@ def populate_spreadsheet():
 # Convert the week number to start-date / end-date format, to enable querying
 # Loop through dates / week numbers until current week is reached
 	# Loop through customers
-		# Query for all orders shipped for that customer from the start-end date
+		# Query for all orders for that customer from the start-end date
 		# Loop through orders
 			# Make a temp dict with coffee bag sizes as keys, quantities as values
 		# Convert coffee bag sizes dict to "total pounds"
@@ -126,10 +115,10 @@ while (curr_week_num > most_recent_week_num):
 
 	for customer in customers:
 		# Get the shipments for the customer in the specified week
-		shipments = shipments_by_customer(customer, start_date, end_date)
+		orders = orders_by_customer(customer, start_date, end_date)
 		
 		# Get a dict of quantities of all coffee sizes in shipment
-		coffee_size_dict = coffee_sizes_in_shipments(shipments)
+		coffee_size_dict = coffee_sizes_in_orders(orders)
 		
 		# Convert coffee size quantities to a single total pounds number
 		customer_pounds = coffee_sizes_to_pounds(coffee_size_dict)
@@ -138,9 +127,6 @@ while (curr_week_num > most_recent_week_num):
 			print "%s - Week # %d - %.2f" % (customer.get('name'), most_recent_week_num, customer_pounds)
 
 	most_recent_week_num += 1
-	
-
-
 
 
 
