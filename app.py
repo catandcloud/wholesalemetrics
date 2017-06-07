@@ -78,7 +78,6 @@ def week_num_to_dates(last_week_num):
 def num_to_letter(num):
 	""" Convert the cell number to a column letter
 	"""
-	num += 1  # Add 1 to the number since the indexing starts with 0
 	title = ''
 	alist = string.uppercase
 	while num:
@@ -107,6 +106,7 @@ def make_new_week_column(week_num):
 			continue
 
 	# Convert the column index to an excel spreadsheet column letter
+	col_idx += 1  # Add 1 to the number since the indexing starts with 0
 	col_letter = num_to_letter(col_idx)
 	col_coord = "%s1" % col_letter
 
@@ -115,10 +115,11 @@ def make_new_week_column(week_num):
 
 	close_workbook(wb)
 
-	return col_letter
+	return col_idx, col_letter
 
 def orders_by_customer(customer, start_date, end_date):
 	# Query for orders by customer for the current week
+	# endpoint = 'orders/listbytag'
 	endpoint = 'orders'
 	params = 'orderDateStart=' + start_date +  '&orderDateEnd=' + end_date + '&customerName=' + customer.get('name')
 
@@ -137,6 +138,8 @@ def coffee_sizes_in_orders(orders):
 				coffee_dict[curr_size] += item.get('quantity')
 
 	for order in orders.get('orders'):
+		if order.get('orderStatus') == 'cancelled':
+			continue
 		for item in order.get('items'):
 			if 'CFE' in item.get('sku'):
 				item_to_dict(item)
@@ -158,9 +161,16 @@ def coffee_sizes_to_pounds(coffee_size_dict):
 			total_pounds += (quantity*5)
 	return total_pounds
 
-def populate_spreadsheet(customer, customer_pounds, col_letter):
-	pass
+def populate_spreadsheet(customer, customer_pounds, col_num, col_letter):
+	# Open the spreadsheet
+	wb = open_workbook()
+	sheet = wb.get_active_sheet()
 
+	for row in sheet.iter_rows(min_row=2, min_col=1, max_col=col_num):
+		if row[0].value == customer.get('company'):
+			sheet[row[-1].coordinate] = customer_pounds
+
+	close_workbook(wb)
 
 # Get a list of the wholesale customers
 customers = get_wholesale_customers()
@@ -170,15 +180,13 @@ curr_week_num = current_week_num()
 
 start_week = most_recent_week_num + 1
 
-pdb.set_trace()
-
 # Loop through all weeks until this week
 while (curr_week_num > start_week):
 	# Get start/end date for week number
 	start_date, end_date = week_num_to_dates(start_week)
 
 	# Write new week to spreadsheet column
-	col_letter = make_new_week_column(start_week)
+	col_num, col_letter = make_new_week_column(start_week)
 
 	for customer in customers:
 		# Get the shipments for the customer in the specified week
@@ -192,10 +200,12 @@ while (curr_week_num > start_week):
 
 		if customer_pounds > 0:
 			# TO DO - Populate spreadsheet with customer pounds
-			populate_spreadsheet(customer, customer_pounds, col_letter)
+			populate_spreadsheet(customer, customer_pounds, col_num, col_letter)
 
 			print "%s - Week # %d - %.2f" % (customer.get('name'), start_week, customer_pounds)
 
 	print "Wrote week %d" % start_week
+
+	pdb.set_trace()
 
 	start_week += 1
