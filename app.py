@@ -5,6 +5,8 @@ import datetime
 import csv
 import os
 import shutil
+import string
+
 
 import pdb
 
@@ -12,9 +14,21 @@ import pdb
 # Shipstation API creds
 api_key = '1faba07e6a5845e7a52111ccda1dae23'
 api_secret = 'e5e6bdfc7333440a867d2b34ef133b18'
+base_endpoint = 'https://ssapi.shipstation.com/'
+
+# Master list of coffee sizes
 coffee_sizes = ['10oz', '1lb', 'KILO', '3lb', '5lb']
 
-base_endpoint = 'https://ssapi.shipstation.com/'
+# Filename for the wholesale spreadsheet
+filename = 'Wholesale Pounds.xlsx'
+
+def open_workbook():
+	from openpyxl import load_workbook
+	wb = load_workbook(filename=filename)
+	return wb
+
+def close_workbook(wb):
+	wb.save(filename)
 
 def make_api_query(endpoint, params):
 	api_endpoint = endpoint + '?' + params
@@ -30,8 +44,20 @@ def get_wholesale_customers():
 	return results.get('customers')
 
 def most_recent_week():
-	last_week_num = 21
-	# d = '%d-W%d' % (2017, datetime.date(2017, 5, 29).isocalendar()[1])
+	# Open the spreadsheet
+	wb = open_workbook()
+	sheet = wb.get_active_sheet()
+
+	last_week_num = None
+	for col in sheet.iter_cols(min_row=1, max_row=1):
+
+		if col[0].value == "Company":
+			# Skip the company column
+			continue
+		elif "Week" in col[0].value:
+			# Mark the last week number
+			last_week_num = int(col[0].value.split(" ")[1])
+
 	return last_week_num
 
 def current_week_num():
@@ -48,6 +74,48 @@ def week_num_to_dates(last_week_num):
 	end_date = (start_date + datetime.timedelta(days=6)).replace(hour=23, minute=59, second=59, microsecond=0)
 
 	return str(start_date), str(end_date)
+
+def num_to_letter(num):
+	""" Convert the cell number to a column letter
+	"""
+	num += 1  # Add 1 to the number since the indexing starts with 0
+	title = ''
+	alist = string.uppercase
+	while num:
+		mod = (num-1) % 26
+		num = int((num - mod) / 26)  
+		title += alist[mod]
+
+	ret = title[::-1]
+
+	return ret
+
+def make_new_week_column(week_num):
+	""" Finds the last column and creates a new column header for the next week number
+	"""
+	# Open the spreadsheet
+	wb = open_workbook()
+	sheet = wb.get_active_sheet()
+
+	col_idx = 0
+	for col in sheet.iter_cols(min_row=1, max_row=1):
+
+		if col[0].value == "Company" or "Week" in col[0].value:
+			# Skip the company column
+			# Continue on to the next column, since this week has already been done
+			col_idx += 1
+			continue
+
+	# Convert the column index to an excel spreadsheet column letter
+	col_letter = num_to_letter(col_idx)
+	col_coord = "%s1" % col_letter
+
+	# Add the cell to the sheet
+	sheet[col_coord] = "Week %d" % week_num
+
+	close_workbook(wb)
+
+	return col_letter
 
 def orders_by_customer(customer, start_date, end_date):
 	# Query for orders by customer for the current week
@@ -90,28 +158,27 @@ def coffee_sizes_to_pounds(coffee_size_dict):
 			total_pounds += (quantity*5)
 	return total_pounds
 
-def populate_spreadsheet():
+def populate_spreadsheet(customer, customer_pounds, col_letter):
 	pass
 
-# Query to get all wholesale customers
-# Get the most recent "week number" from the spreadsheet
-# Convert the week number to start-date / end-date format, to enable querying
-# Loop through dates / week numbers until current week is reached
-	# Loop through customers
-		# Query for all orders for that customer from the start-end date
-		# Loop through orders
-			# Make a temp dict with coffee bag sizes as keys, quantities as values
-		# Convert coffee bag sizes dict to "total pounds"
-		# Insert total pounds into spreadsheet
 
+# Get a list of the wholesale customers
 customers = get_wholesale_customers()
+
 most_recent_week_num = most_recent_week()
 curr_week_num = current_week_num()
 
+start_week = most_recent_week_num + 1
+
+pdb.set_trace()
+
 # Loop through all weeks until this week
-while (curr_week_num > most_recent_week_num):
+while (curr_week_num > start_week):
 	# Get start/end date for week number
-	start_date, end_date = week_num_to_dates(most_recent_week_num)
+	start_date, end_date = week_num_to_dates(start_week)
+
+	# Write new week to spreadsheet column
+	col_letter = make_new_week_column(start_week)
 
 	for customer in customers:
 		# Get the shipments for the customer in the specified week
@@ -124,67 +191,11 @@ while (curr_week_num > most_recent_week_num):
 		customer_pounds = coffee_sizes_to_pounds(coffee_size_dict)
 
 		if customer_pounds > 0:
-			print "%s - Week # %d - %.2f" % (customer.get('name'), most_recent_week_num, customer_pounds)
+			# TO DO - Populate spreadsheet with customer pounds
+			populate_spreadsheet(customer, customer_pounds, col_letter)
 
-	most_recent_week_num += 1
+			print "%s - Week # %d - %.2f" % (customer.get('name'), start_week, customer_pounds)
 
+	print "Wrote week %d" % start_week
 
-
-
-# End the order query at midnight on the current day
-start_date = str(arrow.utcnow().to('US/Pacific'))
-end_date = str(arrow.utcnow().to('US/Pacific'))
-# end_date = str(arrow.utcnow().to('US/Pacific').replace(hour=0, minute=0, second=0, microsecond=0))
-
-endpoint = 'orders/listbytag'
-params = 'shipDate>=' + start_date + '&shipDate<=' + end_date + '&orderStatus=shipped' + '&tagId=49965'
-api_endpoint = endpoint + '?' + params
-
-url = '{}{}'.format(base_endpoint, api_endpoint)
-r = requests.get(url, auth=(api_key, api_secret))
-
-order_results = r.json()
-
-
-
-coffees = {}
-
-# Loop through orders and get the coffees
-for order in order_results['orders']:
-	# Skip orders that were canceled or already shipped
-	if order.get('orderStatus') in ['shipped', 'cancelled']:
-		continue
-
-	# Loop through items and add to coffees dict according to sku
-	for item in order['items']:
-		
-		# Get sku and quantity of current item
-		sku = item.get('sku')
-		quantity = item.get('quantity')
-		
-		# Break if there is an item that does not have a sku - it wouldn't be possible to account for in the spreadsheet
-		if not sku:
-			print "No SKU for item " + item.get('name')
-			continue
-
-		# We only want coffee skus
-		if "CFE" not in sku:
-			continue
-
-		# We only want the following coffee skus, so skip all others
-		if not any(x in sku for x in ['10oz', '1lb', 'KILO', '5lb']):
-			continue
-
-		# Split the sku at the grind (since it has nothing to do with this)
-		sku = sku.split('-')[1] + '-' + sku.split('-')[2]
-
-		# Treat all subscription skus as the same
-		if 'Sub' in sku or 'Staff' in sku:
-			sku = 'Sub' + '-' + sku.split('-')[1]
-
-		# Init the sku coffees dict entry for each new sku
-		if not coffees.get(sku):
-			coffees[sku] = 0
-		
-		# Increment the coffee sku entry by the quantity in the current order
-		coffees[sku] += quantity
+	start_week += 1
