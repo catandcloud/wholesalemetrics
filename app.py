@@ -121,7 +121,7 @@ def orders_by_customer(customer, start_date, end_date):
 	# Query for orders by customer for the current week
 	# endpoint = 'orders/listbytag'
 	endpoint = 'orders'
-	params = 'orderDateStart=' + start_date +  '&orderDateEnd=' + end_date + '&customerName=' + customer.get('name')
+	params = 'orderDateStart=' + start_date +  '&orderDateEnd=' + end_date + '&customerName=' + customer.get('name') + '&orderStatus=shipped'
 
 	order_results = make_api_query(endpoint, params)
 
@@ -138,7 +138,7 @@ def coffee_sizes_in_orders(orders):
 				coffee_dict[curr_size] += item.get('quantity')
 
 	for order in orders.get('orders'):
-		if order.get('orderStatus') == 'cancelled':
+		if order.get('orderStatus') != 'shipped':
 			continue
 		for item in order.get('items'):
 			if 'CFE' in item.get('sku'):
@@ -205,7 +205,5 @@ while (curr_week_num > start_week):
 			print "%s - Week # %d - %.2f" % (customer.get('name'), start_week, customer_pounds)
 
 	print "Wrote week %d" % start_week
-
-	pdb.set_trace()
 
 	start_week += 1
