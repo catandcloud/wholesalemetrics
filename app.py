@@ -68,7 +68,7 @@ def week_num_to_dates(last_week_num):
 	week_num = "%d-W%d" % (2017, last_week_num)
 
 	# Get the start date, and subtract 3 days to make it the previous Thursday at midnight
-	start_date = (datetime.datetime.strptime(week_num + '-0', "%Y-W%W-%w") + datetime.timedelta(days=-3)).replace(hour=0, minute=0, second=0, microsecond=0)
+	start_date = (datetime.datetime.strptime(week_num + '-0', "%Y-W%W-%w") + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
 	# Get the end date by adding 6 days to the start date, making it Wednesday at 11:59pm
 	end_date = (start_date + datetime.timedelta(days=6)).replace(hour=23, minute=59, second=59, microsecond=0)
@@ -117,17 +117,50 @@ def make_new_week_column(week_num):
 
 	return col_idx, col_letter
 
-def orders_by_customer(customer, start_date, end_date):
-	# Query for orders by customer for the current week
-	# endpoint = 'orders/listbytag'
-	endpoint = 'orders'
-	params = 'orderDateStart=' + start_date +  '&orderDateEnd=' + end_date + '&customerName=' + customer.get('name') + '&orderStatus=shipped'
+def convert_fulfillment_to_shipment(fulfillments):
+	
+	fulfillments["shipments"] = fulfillments["fulfillments"]
 
-	order_results = make_api_query(endpoint, params)
+	for fulfillment in fulfillments.get('shipments'):
+		# Query to get the order
+		endpoint = 'orders'
+		params = 'orderNumber=%s' % fulfillment.get('orderNumber')
+		order = make_api_query(endpoint, params)
+		
+		order = order.get('orders')[0]
+		fulfillment["shipmentItems"] = order["items"]
 
-	return order_results
+	return fulfillments
 
-def coffee_sizes_in_orders(orders):
+def combine_shipments_and_fulfillments(shipment_results, fulfillment_results):
+	fulfillments = convert_fulfillment_to_shipment(fulfillment_results)
+	shipment_results['shipments'] += fulfillments.get('shipments')
+	return shipment_results
+
+def shipments_by_customer(customer, start_date, end_date):
+	# Query for shipments by customer for the current week
+	endpoint = 'shipments'
+	params = 'shipDateStart=' + start_date +  '&shipDateEnd=' + end_date + '&recipientName=' + customer.get('name') + '&includeShipmentItems=true'
+	shipment_results = make_api_query(endpoint, params)
+
+	# Query for fulfillments by customer for the current week
+	endpoint = 'fulfillments'
+	params = 'shipDateStart=' + start_date +  '&shipDateEnd=' + end_date + '&recipientName=' + customer.get('name')
+	fulfillment_results = make_api_query(endpoint, params)
+
+	# Combine shipments and fulfillments
+	if shipment_results.get('total') > 0 and fulfillment_results.get('total') > 0:
+		results = combine_shipments_and_fulfillments(shipment_results, fulfillment_results)
+	elif shipment_results.get('total') > 0 and fulfillment_results.get('total') == 0:
+		results = shipment_results
+	elif fulfillment_results.get('total') > 0 and shipment_results.get('total') == 0:
+		results = convert_fulfillment_to_shipment(fulfillment_results)
+	else:
+		results = shipment_results
+
+	return results
+
+def coffee_sizes_in_shipments(shipments):
 	coffee_dict = {}
 
 	def item_to_dict(item):
@@ -137,13 +170,11 @@ def coffee_sizes_in_orders(orders):
 					coffee_dict[curr_size] = 0
 				coffee_dict[curr_size] += item.get('quantity')
 
-	for order in orders.get('orders'):
-		if order.get('orderStatus') != 'shipped':
-			continue
-		for item in order.get('items'):
+	for shipment in shipments.get('shipments'):
+		for item in shipment.get('shipmentItems'):
 			if 'CFE' in item.get('sku'):
 				item_to_dict(item)
-
+	
 	return coffee_dict
 
 def coffee_sizes_to_pounds(coffee_size_dict):
@@ -190,10 +221,10 @@ while (curr_week_num > start_week):
 
 	for customer in customers:
 		# Get the shipments for the customer in the specified week
-		orders = orders_by_customer(customer, start_date, end_date)
+		shipments = shipments_by_customer(customer, start_date, end_date)
 		
 		# Get a dict of quantities of all coffee sizes in shipment
-		coffee_size_dict = coffee_sizes_in_orders(orders)
+		coffee_size_dict = coffee_sizes_in_shipments(shipments)
 		
 		# Convert coffee size quantities to a single total pounds number
 		customer_pounds = coffee_sizes_to_pounds(coffee_size_dict)
